@@ -1,0 +1,212 @@
+﻿<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+	<title>Bham.Ptu Library Usage</title>
+	<style type="text/css">
+		body {
+			font-family: sans-serif;
+		}
+		h1, h2, h3 {
+			border-bottom: 1px solid black;
+		}
+	</style>
+</head>
+<body>
+	<h1>Bham.Ptu Library Usage</h1>
+	<h2>Backstory</h2>
+	<p>Directed Perception, now a part of FLIR Systems, have a nasty habit of charging an
+		extra $250<a href="#foot1">[1]</a> for their PTU-CPI product (which I understand
+		is really just a simple and error-prone C API provided with a serial port API for
+		Windows and Linux). I was working on an academic project where we had just exhausted
+		our budget but still needed the binary communications protocol. So I had to spend
+		a few weeks reverse-engineering the protocol (thanks to Serial Port monitoring software)
+		as well as combing the web for clues and fragments of relevant code by those who
+		went before me. I believe I have every operation defined by the protocol documented
+		in this library (see the PTCommand.cs file).</p>
+	<h2>Compatibility</h2>
+	<p>This library should be compatible with every current DP/FLIR PT unit (that is, the
+		D46, D47, D48, D100, and D300). I have only been able to test it with the DP PTU-D46
+		and D48 models. If you&#39;re using any other model, such as the D300 and have any problems (or if it works flawlessly) then let me
+		know. I can be reached by the contact form on <a href="http://www.w3bbo.com">my website</a>
+		and on CodePlex.</p>
+	<ul>
+		<li>D46<ul>
+			<li>The pan axis seems to be inverted.</li>
+			</ul>
+		</li>
+		<li>D47<ul>
+			<li>Untested.</li>
+			</ul>
+		</li>
+		<li>D48<ul>
+			<li>Setting the Continuous Axis Rotation factory
+		setting causes pretty much everything to go haywire. Given this command overwrites
+		the firmware I strongly advise setting it unless you know what you&#39;re doing. Setting 
+				it (using the ASCII protocol and methods) should work on the D300.</li>
+			</ul>
+		</li>
+		<li>D100<ul>
+			<li>Untested</li>
+			</ul>
+		</li>
+		<li>D300<ul>
+			<li>Untested</li>
+			</ul>
+		</li>
+	</ul>
+	<h2>Usage</h2>
+	<p>Simply add a reference to the Bham.Ptu.dll assembly and import the <code>Bham.Ptu</code>
+		namespace into your relevant source files. There is only one class you need to use:
+		<code>Bham.Ptu.PTUnit</code>, which encapsulates a single Pan/Tilt Unit.</p>
+	<h3>Initialisation</h3>
+	<p>You&#39;ll notice the PTUnit constructor takes in a single string parameter, the
+		name of the serial port to use. Unless you know the serial port to use beforehand
+		(and you probably don&#39;t) then you need to enumerate the serial ports and test
+		them to see if a PTU is attached (or not).</p>
+	<p>Use the <code>System.IO.Ports.SerialPort.GetPortNames()</code> method to get all
+		the ports attached to the computer. You can then use the static <code>PTUnit.GetFirmwareInfo(String
+			portName)</code> method to see if a PTU is attached to that port or not. The
+		method returns a PTFirmwareInfo class which contains information about the PTU (if
+		connected). If a PTU is not connected then it returns null. The timeout is 500ms,
+		so try to avoid doing the check on the Window messaging thread. The Bham.Ptu.UI
+		project contains some code that tests each port (using a BackgroundWorker component
+		so it doesn&#39;t lock the UI). Here is a quick example as a console application:</p>
+	<pre>String[] portNames = SerialPort.GetPortNames();
+foreach(String portName in portNames) {
+	
+	PTFirmwareInfo ptuInfo = PTUnit.GetFirmwareInfo( portName );
+	if( ptuInfo == null ) Console.WriteLine( portName + &quot;: not connected&quot; );
+	else                  Console.WriteLine( portName + &quot;: &quot; + ptuInfo.FirmwareString );
+	
+}</pre>
+	<h3>Doing Things</h3>
+	<p>Every operation is bound to a single method in the class (e.g. SetPanDesiredPosition).
+		Your PTU will have come with the ASCII protocol&#39;s Command Reference Manual.
+		Both the ASCII and Binary protocols are identical in terms of the operations they
+		make the unit carry out, so you&#39;ll find the documentation in the CRM should
+		be enough to explain each method in this library.</p>
+	<p>Unless explicitly noted (in the XML comments) every method of the PTUnit class returns
+		immediately (i.e. it does not block the thread). So if you call SetDesiredPanPosition(
+		500 ); then the unit will begin moving to that position as your code continues to
+		run. If you want the thread to block until an operation has been completed then
+		call AwaitCompletion() immediately afterwards. For example, this code doesn&#39;t
+		really achieve much:</p>
+	<pre>using(PTUnit unit = new PTUnit(&quot;COM1&quot;)) {
+	
+	unit.SetPanDesiredPosition( 0 );
+	unit.SetPanDesiredPosition( 500 );
+	unit.SetPanDesiredPosition( 0 );
+}</pre>
+	<p>But this code will cause the unit to complete the operations defined:</p>
+	<pre>using(PTUnit unit = new PTUnit(&quot;COM1&quot;)) {
+	
+	unit.SetPanDesiredPosition( 0 );
+	unit.AwaitCompletion();
+	unit.SetPanDesiredPosition( 500 );
+	unit.AwaitCompletion();
+	unit.SetPanDesiredPosition( 0 );
+	unit.AwaitCompletion();
+}</pre>
+	<p>Of course the PTUnit class exposes the SetExecutionModeSlaved and Immediate methods
+		(which work in association with AwaitCompletion) if you wish to synchronise your
+		PTU&#39;s motions.</p>
+	<p>Note that PTUnit implements IDisposable (as it locks its associated serial ports
+		whilst in use) for this reason you should wrap your use of PTUnit within a <code>using()
+			{}</code> block (in C#), or be sure to call <code>.Dispose()</code> (in other
+		languages, like VB.NET) after you have finished using the controller.</p>
+	<p>As the PTUnit class exposes each command as a method and is otherwise devoid of 
+		properties it is unsuitable for use with a PropertyGrid control. For that reason 
+		there exists a PTUnitState class which captures a snapshot of the position and 
+		configuration state of the PTUnit suitable for display in a PropertyGrid or 
+		other GUI. You can then make changes to the PTUnitState instance and and call 
+		the SaveChanges() method to apply them to the PTUnit. I recommend calling 
+		SaveChanges() on a background thread because some actions, such as setting the 
+		acceleration values, take a while to be processed by the unit.</p>
+	<h3>Units</h3>
+	<p>The unit of the Position methods is the &quot;step&quot;. Different PT units have
+		different ranges of motion, so be sure to consult the GetMinPosition/GetMaxPosition
+		operations. You can convert steps to degrees by calling the ConvertPanStepsToDegrees
+		and ConvertTiltStepsToDegrees methods. These methods also have DegreesToSteps equivalents.
+		See Bham.Ptu.UI.MainForm.cs for a working example.</p>
+	<p>The unit of the Speed methods is the &quot;steps per second&quot;. Note that
+		when in Pure Velocity mode (where the SetDesiredPosition operations are ignored)
+		speed is a signed value (a positive number means it pans clockwise, but a negative
+		value means it pans counter-clockwise). In Independent mode all speed values are
+		interpreted as absolute figures. Because it uses a 16-bit integer it means that
+		if you pass in a negative signed 16-bit integer when it&#39;s in Independent mode
+		then it will interpret the MSB as 2^15 and will be rejected for being beyond the
+		maximum speed of the unit.</p>
+	<h3>Errors and Exceptions</h3>
+	<p>If you send a command with a bad argument then the PTU will report the error and
+		the library wll throw a PTControllerException. If the PTU does not respond to a
+		command within reasonable time then the library will throw a PTTimeoutException
+		<b>or</b> it may throw a System.TimeoutException depending on where exactly the
+		library was waiting. Assuming you&#39;re using the library appropriately and not
+		working in cases where the cable might come disconnected then you shouldn&#39;t
+		experience any exceptions.</p>
+	<h3>What Not To Do</h3>
+	<p>As described above, I don&#39;t recommend enabling the Continuous Axis Rotation 
+		feature on any model besides the D300. Not only because it can cause the 
+		internal cables to be ripped apart, but also because the command is not fully 
+		documented and so it has unpredictable effects on other commands (such as the 
+		position limits and setting the current position).</p>
+	<p>I have also experienced problems with setting the stepping resolution. The 
+		default is Half-step resolution. Contrary to what the Command Reference Manual 
+		states, the &#39;W&#39; commands are supported by all PTU models with a firmware version 
+		greater than 2.13. In principle, the command should work fine and the position, 
+		resolution, and speed operations should be adjusted accordingly, except that in 
+		reality the firmware doesn&#39;t recalculate everything and you need to perform a 
+		reset to recalibrate after changing the stepping setting. I also came accross 
+		unpredictable behaviour where position limits below 0 degrees were correctly 
+		calculated, but those above weren&#39;t.</p>
+	<p>I have implemented the code to alter the stepping, however I commented it out, 
+		leaving only code to query the current stepping. If you&#39;re after this advanced 
+		behaviour you&#39;re welcome to uncomment the code and experiment yourself, but be 
+		aware of the difficulties.</p>
+	<h2>What&#39;s Missing?</h2>
+	<p>The ASCII protocol features a few commands that have no (apparent) binary protocol
+		equivalents, such as the GetEnvironment command which returns the operating temperature
+		and supplied voltage. Other binary commands have not been implemented because they
+		weren&#39;t applicable to my work. Here is a complete listing:</p>
+	<ul>
+		<li>ASCII-only commands:<ul>
+			<li>Serial port configuration commands - &quot;@&quot;</li>
+			<li>Expanded IO Commands (for serial mouse and joystick support)</li>
+		</ul>
+		</li>
+		<li>Binary commands:<ul>
+			<li>Networking commands:<ul>
+				<li>SetUnitId</li>
+				<li>GetUnitId</li>
+				<li>SelectUnit</li>
+			</ul>
+			</li>
+		</ul>
+		</li>
+	</ul>
+	<p>Implementing the networking commands will require some significant reworking of the
+		PTUnit class, as it is built on the assumption that there is only one unit connected
+		per serial port.</p>
+	<p>Implementing further ASCII commands is done using the AsciiExchange method of the 
+		PTConnection and PTUnit classes. The PTUnit.AsciiExchange method disables 
+		Verbose Mode and Echo which makes processing the results easier, the method then 
+		automatically restores those settings to their original values afterwards.</p>
+	<h2>License</h2>
+	<p>This library is licensed under the GNU General Public License v2 (GPLv2) and <b>not</b>
+		the GNU LGPL. This means that if you link (&quot;reference&quot; in .NET parlance)
+		the library in your software and your software is released to the public in some
+		form then your software must conform with GPLv2.</p>
+	<p>If you are not comfortable with this or not able to conform with the GPL, then please
+		contact me so we can work something out. There is a contact form <a href="http://www.w3bbo.com">on my homepage at w3bbo.com</a>.</p>
+	<p>Also, note that a direct porting of this library to another language (e.g. C++, Java,
+		Python) counts as a derivative work, so your library implementation must also conform
+		with the GPL too.</p>
+	<p>If you&#39;re looking a C++ version of this API, I have made one based on Qt (and
+		it inherits Qt&#39;s cross-platformness), but it needs more polish before it&#39;s
+		released. If you&#39;re interested in that library, please contact me.</p>
+	<h2>Footnotes</h2>
+	<p id="foot1">[1] According to a 2005 price-sheet from DP, the &quot;PTU-CPI&quot; product
+		is $250.00:<a href="http://pointless.net/pipermail/ronja/attachments/20051102/36b5a398/us-asciiQ24Intl2DPrice2DList2Epdf-0001.pdf">
+			http://pointless.net/pipermail/ronja/attachments/20051102/36b5a398/us-asciiQ24Intl2DPrice2DList2Epdf-0001.pdf</a></p>
+</body>
+</html>
